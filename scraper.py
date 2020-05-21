@@ -6,6 +6,8 @@
 #Selenium				simula un browser, click, eventi, form e bla bla bla
 #Pythonanywhere			permette d'eseguire script python mediante scheduling
 
+#The executable can be created with: $ pyinstaller --onefile scraper.py
+
 import requests as req
 from bs4 import BeautifulSoup as bs
 import pandas as pd
@@ -20,18 +22,16 @@ def scrape_withPandas(url):
 	print("\nWarning: pandas to not convert correctly float number")
 
 	dfs = pd.read_html(url, decimal=',') #the comma separator does not work: decimal=','
-	#for df in dfs:
-		#print(df)
 
 	dailyStats = dfs[0]			#get the first table
 	print(dailyStats)
 	values = dfs[0][1].tolist()	#second column to list
-	return(values[:3])
+	return(values[2:0:-1])
 
 def scrape_withBS(url):
+	values = [0,0,0]
 	if isNaN(url):
 		print("\tMissing link")
-		return([0,0,0])
 	else:
 		#Download the page with requests
 		page = req.get(url)
@@ -48,9 +48,15 @@ def scrape_withBS(url):
 		rows_leftColumns = table.find_all(class_='t-text -right')	#extraction based on a class
 		#_ = table.find_all('span')									#extraction based on tag
 
-		values = [i.text for i in rows_leftColumns[:3] ]						#extract the text content of each element
-		values = [float(v.replace(',','.')) if v!='' else 0 for v in values ]	#convert the numbers (save as string) into number
-		return(values[:3])
+		values = []
+		for el in rows_leftColumns[2:0:-1]:	#iteration 0°=max - 1°=min
+			v = el.text.replace(',','.')	#extract the text content of each element
+			if v!='':
+				values.append(float(v))		#convert the numbers (save as string) into number
+			else:
+				values.append(0)			#coorner case for empty values online
+		
+	return(values)
 
 
 def loadData(filePath, companies, sep=','):
@@ -91,9 +97,9 @@ def isNaN(num):
     return num != num
 
 
-def loadTargets(f_targets):
+def loadTargets(f_targets, sep=','):
 	if os.path.exists(f_targets):
-		targets_df = pd.read_csv(f_targets, sep=',')
+		targets_df = pd.read_csv(f_targets, sep=sep)
 
 		#companies = targets_df['nome'].tolist()	#extract based on Serie name
 		companies = targets_df.iloc[:, 0].tolist()	#extract based on Serie index
@@ -112,11 +118,11 @@ def processCompanies(archive, companies, urls):
 		print("\nprocessing:", company)
 		header.append( createHeaders(company) )
 
-		#values = [219.0, 219.0, 214.2]			#tmp: if server do not show values in table
 		values = scrape_withBS(url)				#returns open, max, min
-		delta = round(values[1] - values[2], 3) #max-min
+		delta = round(values[1] - values[0], 3) #max-min
+		values.append(delta)					#AKA min, max, delta
 
-		values = [values[2], values[1], delta]	#AKA min, max, delta
+		values = ['{:.3f}'.format(v) for v in values]
 		print("\tCollected data:", values)
 		dailyMeasure.append(values)
 
@@ -128,23 +134,21 @@ def processCompanies(archive, companies, urls):
 def main():
 	#Load company names and urls from file
 	f_targets = "titoli.csv"
-	companies, urls = loadTargets(f_targets)
+	companies, urls = loadTargets(f_targets, sep=';')
 
 	#Load the existing df or create a new one
-	append = True	#flag to append, instead of overwrite. 
+	append = False	#flag to append, instead of overwrite. 
 	#NB: the append DOES NOT write the column headers, could be a problem with new companies and/or with the first record at all...
 	f_archive = "andamentoTitoli.csv"
 	if append:
 		archive = []
 	else:
-		archive = loadData(f_archive, companies)
+		archive = loadData(f_archive, companies, sep=';')
 
 	#Process all the companies
 	df_archive = processCompanies(archive, companies, urls)
-	saveData(f_archive, df_archive, append)
+	saveData(f_archive, df_archive, append, sep=';')
 		
-	#todo: put the running code on Pythonanywhere
-
 
 if __name__ == "__main__":
 	main()
