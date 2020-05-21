@@ -12,7 +12,7 @@ import requests as req
 from bs4 import BeautifulSoup as bs
 import pandas as pd
 
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 import os
 
 
@@ -61,8 +61,14 @@ def scrape_withBS(url):
 
 def loadData(filePath, companies, sep=','):
 	fileName, fileExtension = os.path.splitext(filePath)
+
 	if   os.path.exists(filePath) and fileExtension == '.csv':
-		df = pd.read_csv(filePath, sep=sep)
+		df = pd.read_csv(filePath, sep=sep, dtype=object)
+		#dtype=object force pandas to consider the number (int or float) as string while loading the csv
+		#this guarantee that a number as 0.202 or 45.400 is not converted, solving 2 problems:
+		#1) the deletion of the precision (3 decimal digits) by removing zeros: 45.400 != 45.4
+		#2) the approsimation of a float do not influence a string: 0.202 != 0.201999999999999
+
 	elif os.path.exists(filePath) and fileExtension == '.pkl':
 		df = pd.read_pickle(filePath)
 	else:
@@ -87,6 +93,11 @@ def saveData(filePath, df, append, sep=','):
 	print("Data are saved.")
 	
 
+def isWorkingDay():
+	day = date.today().weekday()
+	#This respect, more or less, the period when the borsa's website has consistent data.
+	return( day<5 or (day==5 and datetime.now().hour<5) )
+
 def createHeaders(name):
 	return([ name+" min",  name+" max",  name+" delta" ])
 
@@ -107,18 +118,28 @@ def loadTargets(f_targets, sep=','):
 		return(companies, urls)
 
 def processCompanies(archive, companies, urls):
-	#initialization
+	#Initialization
 	header = []
 	dailyMeasure = []
-	header.append(["data", "ora"])
-	dailyMeasure.append([ date.today().strftime("%d/%m/%Y") ])
-	dailyMeasure.append([ datetime.now().strftime("%H:%M:%S") ])
 
+	#Corner case: data still online but referred to the previous day (the night is a better moment for scraping)
+	header.append(["data", "ora"])
+	now = datetime.now()
+	today = date.today()
+	if now.hour<5:			#borsa have not open and the online table (hopefully) is not reset yet
+		yesterday = today - timedelta(days=1)
+		dailyMeasure.append([ yesterday.strftime("%d/%m/%Y") ])
+		dailyMeasure.append(["23:59:59"])
+	else:					#today's borsa is running or is over
+		dailyMeasure.append([ today.strftime("%d/%m/%Y") ])
+		dailyMeasure.append([ now.strftime("%H:%M:%S") ])
+
+	#For each company
 	for company, url in zip(companies, urls):
 		print("\nprocessing:", company)
 		header.append( createHeaders(company) )
 
-		values = scrape_withBS(url)				#returns open, max, min
+		values = scrape_withBS(url)				#returns min, max
 		delta = round(values[1] - values[0], 3) #max-min
 		values.append(delta)					#AKA min, max, delta
 
@@ -132,22 +153,25 @@ def processCompanies(archive, companies, urls):
 
 
 def main():
-	#Load company names and urls from file
-	f_targets = "titoli.csv"
-	companies, urls = loadTargets(f_targets, sep=';')
+	if isWorkingDay():
+		#Load company names and urls from file
+		f_targets = "titoli.csv"
+		companies, urls = loadTargets(f_targets, sep=';')
 
-	#Load the existing df or create a new one
-	append = False	#flag to append, instead of overwrite. 
-	#NB: the append DOES NOT write the column headers, could be a problem with new companies and/or with the first record at all...
-	f_archive = "andamentoTitoli.csv"
-	if append:
-		archive = []
+		#Load the existing df or create a new one
+		append = False	#flag to append, instead of overwrite. 
+		#NB: the append DOES NOT write the column headers, could be a problem with new companies and/or with the first record at all...
+		f_archive = "andamentoTitoli.csv"
+		if append:
+			archive = []
+		else:
+			archive = loadData(f_archive, companies, sep=';')
+
+		#Process all the companies
+		df_archive = processCompanies(archive, companies, urls)
+		saveData(f_archive, df_archive, append, sep=';')
 	else:
-		archive = loadData(f_archive, companies, sep=';')
-
-	#Process all the companies
-	df_archive = processCompanies(archive, companies, urls)
-	saveData(f_archive, df_archive, append, sep=';')
+		print("Today the Borsa is closed, and the website has no data...")
 		
 
 if __name__ == "__main__":
