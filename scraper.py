@@ -7,6 +7,7 @@
 #Pythonanywhere			permette d'eseguire script python mediante scheduling
 
 #The executable can be created with: $ pyinstaller --onefile scraper.py
+#The requirements for the project were created with: $ pip3 freeze > requirements.txt
 
 import requests as req
 from bs4 import BeautifulSoup as bs
