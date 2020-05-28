@@ -44,7 +44,7 @@ class GDriveInterface:
 		""" Initialization function. """
 		self.printMessage = printMessage
 		self.drive = self.login(storeCredentials)
-		##todo: solve this
+		#todo: solve this
 		#print("Warning: this Class do not manage path with ../ to access previous folder nor / to access root. \n\tIt always go down in the tree folders structure.")
 
 	def login(self, storeCredentials: bool=True) -> GoogleDrive:
@@ -77,6 +77,13 @@ class GDriveInterface:
 
 
 	#################################   Support Functions   ####################################################
+
+	def parentID(self, f: GoogleDriveFile) -> str:
+		""" Get the parent ID of the given file. None if it does not exist. """
+		if f is None:
+			return None
+		else:
+			return f['parents'][0].get('id')
 
 	def info(self, f: GoogleDriveFile) -> str:
 		""" Print info of the given file. """
@@ -120,7 +127,7 @@ class GDriveInterface:
 		#file_list = self.drive.ListFile({'q': "'1WmwwykABr2VE4WzVwRgv8YhYkEZ1AC6A' in parents and trashed=false"}).GetList()
 		#file_list = self.drive.ListFile({"q": "mimeType='application/vnd.google-apps.folder' and trashed=false"}).GetList()
 		#file_list = self.drive.ListFile({"q": "'root' in parents and trashed=false"}).GetList()
-
+		path = path.strip("/")
 		if path=="":
 			#simply optimization
 			return([])
@@ -162,9 +169,9 @@ class GDriveInterface:
 			#extract even the filename ID if exist
 			if self.isPathFile(filename):
 				if len(elementsOnPath)==0:
-					id = self.download(path, "root")
+					id = self.downloadGdFile(path, "root")
 				else:
-					id = self.download(path, elementsOnPath[-1]['id'])
+					id = self.downloadGdFile(path, elementsOnPath[-1]['id'])
 
 				elementsOnPath.append(id)
 
@@ -192,7 +199,7 @@ class GDriveInterface:
 		
 	def getID(self, path: str, parentID: str=None) -> str:
 		""" Get the ID of the element identified from the path, None if it does not exist. """
-		file = self.download(path, parentID)
+		file = self.downloadGdFile(path, parentID)
 		if file is None:
 			return None
 		else:
@@ -239,22 +246,29 @@ class GDriveInterface:
 
 	#################################   Function on Local OS   #################################################
 
-	def createLocalFolder(self, path: str) -> None:
+	def createLocalFolder(self, path: str) -> bool:
 		""" Create a folder on the local OS at the given location. A folder name cannot contians dot. """
+		res = False
 		if self.isPathFolder(path):
 			if not os.path.isdir(path):
 				try:
 					os.mkdir(path)
+					res = True
+					if self.printMessage:
+						print("Created folder:", path)
 				except IOError:
 					print("Error while creating the folder at:", path)
 		else:
 			print("NB: This interface assume that a folder name does not contians dot !")
+		return res
 
-	def removeLocal(self, path: str) -> None:
+	def removeLocal(self, path: str) -> bool:
 		""" Remove the specified path. It can be a file or even a folder. """
 		#Try to remove file
 		try:
 			os.remove(path)
+			if self.printMessage:
+				print("Removed file:", path)
 		except IsADirectoryError:
 
 			#Try to remove folder and its content
@@ -262,6 +276,8 @@ class GDriveInterface:
 				shutil.rmtree(path) 
 			except OSError:
 				print ("Not able to remove:", path)
+				return False
+		return True
 
 	def saveLocalFile(self, file: GoogleDriveFile, path: str) -> bool:
 		""" Save the file at the given location. """
@@ -269,6 +285,8 @@ class GDriveInterface:
 		#if self.existsLocal(parent) and self.isPathFile(filename):
 		try:
 			file.GetContentFile(path.strip("/"))	
+			if self.printMessage:
+				print("Saved file to:", path)
 		except (NotADirectoryError, FileNotFoundError) as err:
 			print(err)
 			return False
@@ -303,30 +321,22 @@ class GDriveInterface:
 			if parentID is None:
 				parentID = self.getLastFolderID(parent)
 			if parentID is not None:
-				file = self.download(path, parentID)
-				#self.__deleteRecursive(file)	#apparently gDrive automatically delete all the tree...
-				self.__del(file)
-				return True
+				file = self.downloadGdFile(path, parentID)
+				return self.__del(file)
 		return False
 
-	def __deleteRecursive(self, file: GoogleDriveFile, permanentlyDelete: bool=False) -> None:
-		""" Deprecated: Delete the file/folder given. """
-		print("Warning deprecated function.")
-		if file is not None:
-			if self.isFile(file):
-				self.__del(file, permanentlyDelete)
-			else: 
-				#folder imply recursion...
-				#No recursion at the moment.
-				self.__del(file, permanentlyDelete)		
-
-	def __del(self, file: GoogleDriveFile, permanentlyDelete: bool=False) -> None:
-		if permanentlyDelete:
-			file.Delete()	# Permanently delete the file.
-		else:
-			file.Trash()	# Move file to trash.
-		if self.printMessage:	
-			print('Deleted' + self.info(file))	
+	def __del(self, file: GoogleDriveFile, permanentlyDelete: bool=False) -> bool:
+		try:
+			if permanentlyDelete:
+				file.Delete()	# Permanently delete the file.
+			else:
+				file.Trash()	# Move file to trash.
+			if self.printMessage:	
+				print('Deleted' + self.info(file))	
+		except Exception as err:
+			print(err)
+			return False
+		return True
 
 
 	#################################   Upload Functions   #####################################################
@@ -338,7 +348,7 @@ class GDriveInterface:
 			#manage file
 			try:
 				with open(pathFrom, "r") as fLocal:
-					res = self.__uploadFile(fLocal, pathTo, parentID)
+					res = self.uploadFile(fLocal, pathTo, parentID)
 			except IOError:
 				print(IOError, 'Error while reading the file given.')
 		else:
@@ -353,15 +363,11 @@ class GDriveInterface:
 		res = False
 		if parentID is None:
 			#if not defined yet precompute the ID of the folder and parent
-			IDs = self.getPathIDs(pathTo)
-			if IDs is not None:
-				#the folder does not exist yet
-				newFolderID = IDs[-1]
-				if len(IDs)>1:
-					#exist a parent ID
-					parentID = IDs[-2]
-				else:
-					parentID = "root"
+			elements = self.getPathElements(pathFrom)
+			if elements is not None:
+				#the folder exists
+				newFolderID = elements[-1]['id']
+				parentID = self.parentID(elements[-1])
 
 		if parentID is not None:
 			#still updating folder ID
@@ -382,8 +388,8 @@ class GDriveInterface:
 					res = res and tmp	
 		return res
 					
-	def __uploadFile(self, file: "OS file", pathTo: str, parentID: str=None) -> bool:
-		""" Upload a file from the source path to the destination path. """
+	def uploadFile(self, file: "OS file", pathTo: str, parentID: str=None) -> bool:
+		""" Upload the given file to the destination path. """
 		parent, filename = self.__pathAndFile(pathTo)
 		res = True
 		if parentID is None:
@@ -413,16 +419,12 @@ class GDriveInterface:
 
 
 	#################################   Download Functions   ###################################################
-
 		
-	def download(self, path: str, parentID: str=None) -> GoogleDriveFile:
-		""" Download the file/folder at the given location. None if it does not exist. """
+	def downloadGdFile(self, path: str, parentID: str=None) -> GoogleDriveFile:
+		""" Download the google drive file/folder at the given location. None if it does not exist. """
 		if parentID is None:
 			elements = self.getPathElements(path)
-			print("elements:(", len(elements), ")")
 			if len(elements)>0:
-				[print(self.info(el)) for el in elements]
-				print(elements[-1])
 				return elements[-1]
 		else:
 			file_list = self.drive.ListFile({'q': "'%s' in parents and trashed=false" % str(parentID)}).GetList()
@@ -433,41 +435,52 @@ class GDriveInterface:
 					return(f)
 		return(None)
 
-	
-	#def getFolder_inLocation(self, parentID, filename): # -> GoogleDriveFile
-	#	return self.download(parentID, filename)
+	def download(self, pathFrom: str, pathTo: str, parentID: str=None) -> bool:
+		""" Download the source path [online] (and the entire subtree) to the destination path [local OS]. """
+		#initialize variables
+		actualFile = None
+		if parentID is None:
+			elements = self.getPathElements(pathFrom)
+			
+			if elements is not None:
+				actualFile = elements[-1]
+				parentID = self.parentID(elements[-1])
+		else:
+			actualFile = self.downloadGdFile(pathFrom, parentID)
 
-	#def getFolder(self, path): # -> GoogleDriveFile
-	#	return self.getFile(path)
+		#do the first recursive call
+		res = False
+		parent, filename = self.__pathAndFile(pathTo)
+		if	actualFile is not None and self.existsLocal(parent):
+			res = self.__save(actualFile, pathTo.strip('/'))
 
-	#def getFile(self, path): # -> GoogleDriveFile
-	#	parent, filename = self.__pathAndFile(path)
-	#	parentID = self.getFolderID(parent)
-		
-	#	if parentID is None:
-	#		file_list = self.drive.ListFile({'q': "'root' in parents and trashed=false"}).GetList()
-	#	else:
-	#		file_list = self.drive.ListFile({'q': "'%s' in parents and trashed=false" % str(parentID)}).GetList()
+		return res
 
-	#	for f in file_list:
-	#		if f['title'] == filename:
-	#			if self.printMessage:	
-	#				print('Found' + self.info(f))
-	#			return(f)
-	#	return(None)
+	def __save(self, file: GoogleDriveFile, pathTo: str) -> bool:
+		""" Recursive function that save on the local OS the given file and its entire subtree. """
+		res = False
+
+		#different operation according to file or folder
+		if self.isFile(file):
+			res = self.saveLocalFile(file, pathTo)
+		else:
+			self.createLocalFolder(pathTo)
+			file_list = self.drive.ListFile({'q': "'%s' in parents and trashed=false" % file['id']}).GetList()
+			
+			res = True
+			#recursive call foreach sub element of the folder
+			for subFile in file_list:
+				newPathTo = '/'.join([pathTo, subFile['title']])
+				tmp = self.__save(subFile, newPathTo)
+				res = res and tmp	#update the return value
+		return res
 
 
-	############################################################################################################
-
-	def prova(self) -> None:
-		print("test function")
-		fl = self.drive.ListFile({'q': "'root' in parents and trashed=false"}).GetList()
-		print(type(fl[0]))
+	################################# - - - THE END - - - ######################################################
 
 def main():
 	gDrive = GDriveInterface(storeCredentials=True, printMessage=True)
 
-	print(gDrive.upload("prova", "driveAPI/try"))
 
 if __name__ == "__main__":
 	main()
