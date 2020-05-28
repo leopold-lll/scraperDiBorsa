@@ -408,7 +408,7 @@ class GDriveInterface:
 			parentID = self.getLastFolderID(parent)
 		
 		self.delete(pathTo, parentID) #delete the previous file
-		if parentID is "root":
+		if parentID=="root":
 			newFile = self.drive.CreateFile({'title': filename, "parents":  ['root']})
 		else:
 			newFile = self.drive.CreateFile({'title': filename, "parents":  [{"id": parentID}] })

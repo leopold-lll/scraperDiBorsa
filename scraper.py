@@ -19,6 +19,13 @@ import os
 from googleDriveAPI.googleDriveAPI import GDriveInterface
 
 
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from pydrive.files	import GoogleDriveFile
+from googleapiclient.discovery import build
+import os
+import shutil
+
 #################################   Scraping functions   ###################################################
 
 def scrape_withPandas(url):
