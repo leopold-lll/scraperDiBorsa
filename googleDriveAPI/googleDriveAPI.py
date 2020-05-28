@@ -5,9 +5,9 @@ from googleapiclient.discovery import build
 import os
 import shutil
 
-#pyDrive docs: https://pythonhosted.org/PyDrive/filemanagement.html
 
 class GDriveInterface:
+	#pyDrive docs: https://pythonhosted.org/PyDrive/filemanagement.html
 
 	def __functionName(self, pippo: str="example", pluto: 'list of string'=None) -> int:
 		""" 
@@ -40,12 +40,21 @@ class GDriveInterface:
 
 	#################################   Initialization Function   ##############################################
 
-	def __init__(self, storeCredentials: bool=True, printMessage: bool=True) -> None:
+	def __init__(	self, storeCredentials: bool=True, printMessage: bool=True, \
+					credentialsFile: str="myCredentials.json", clientSecrets: str="client_secrets.json") -> None:
 		""" Initialization function. """
 		self.printMessage = printMessage
+		self.credentialsFile = credentialsFile
+		self.setClientSecrets(clientSecrets)
+
 		self.drive = self.login(storeCredentials)
 		#todo: solve this
 		#print("Warning: this Class do not manage path with ../ to access previous folder nor / to access root. \n\tIt always go down in the tree folders structure.")
+
+	def setClientSecrets(self, clientSecrets: str) -> None:
+		""" Set the location of the client secret file. """
+		self.clientSecrets = clientSecrets
+		GoogleAuth.DEFAULT_SETTINGS['client_config_file'] = clientSecrets
 
 	def login(self, storeCredentials: bool=True) -> GoogleDrive:
 		"""
@@ -57,7 +66,7 @@ class GDriveInterface:
 
 		# Try to load saved client credentials
 		if storeCredentials:
-			gauth.LoadCredentialsFile("myCredentials.json")
+			gauth.LoadCredentialsFile(self.credentialsFile)
 
 		if gauth.credentials is None:
 			# Authenticate if they're not there
@@ -70,9 +79,11 @@ class GDriveInterface:
 			storeCredentials = False
 			gauth.Authorize()
 
-		if storeCredentials:
+		if storeCredentials and not os.path.exists(self.credentialsFile):
+			print("Login Done.")
 			# Save the current credentials to a file
-			gauth.SaveCredentialsFile("myCredentials.json")
+			gauth.SaveCredentialsFile(self.credentialsFile)
+
 		return GoogleDrive(gauth)
 
 
@@ -412,7 +423,7 @@ class GDriveInterface:
 
 		if self.printMessage:
 			if res:
-				print('Uploaded' + self.info(newFile))
+				print('Upload' + self.info(newFile))
 			else:
 				print('Faild uploading' + self.info(newFile))
 		return res

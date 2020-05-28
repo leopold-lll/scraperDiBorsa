@@ -2,4 +2,7 @@
 .xlsx
 andamentoTitoli.csv
 
-googleDriveAPI/myCredentials.json
+myCredentials.json
+
+__pycache__
+googleDriveAPI/__pycache__
