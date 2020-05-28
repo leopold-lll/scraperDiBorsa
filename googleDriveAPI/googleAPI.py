@@ -81,10 +81,10 @@ class GDriveInterface:
 	def info(self, f: GoogleDriveFile) -> str:
 		""" Print info of the given file. """
 		if f is None:
-			return ""
+			return "\tNot existing file."
 		else:
 			#print('location: %s, parents: %s' % (f['mimeType'], f['parents']))
-			return('\tfile -> title: %s, id: %s, parents ID: %s' % (f['title'], f['id'], f['parents'][0].get('id')))
+			return('\tfile -> %s, id: %s, parentID: %s' % (f['title'], f['id'], f['parents'][0].get('id')))
 
 	def __pathAndFile(self, path: str) -> (str, str):
 		""" Given a path separate it into last object (file or folder) and previous part. """
@@ -149,38 +149,58 @@ class GDriveInterface:
 
 			#Identify the remaining folders on the path
 			for name in foldersNameList[1:]:
+				found = False
 				for f in plausibleFolders:
 					#check parent id and my name
 					if f['parents'][0].get('id')==elementsOnPath[-1]['id'] and f['title']==name:
-							elementsOnPath.append(f)
+						elementsOnPath.append(f)
+						found = True
+				if not found:
+					elementsOnPath.append(None)
+					return(elementsOnPath)
 
 			#extract even the filename ID if exist
 			if self.isPathFile(filename):
 				if len(elementsOnPath)==0:
-					elementsOnPath.append( self.downloadFile(path, None) )
+					id = self.download(path, "root")
 				else:
-					elementsOnPath.append( self.downloadFile(path, elementsOnPath[-1]['id']) )
+					id = self.download(path, elementsOnPath[-1]['id'])
+
+				elementsOnPath.append(id)
 
 			return(elementsOnPath)
 		
 	def getLastFolderID(self, path: str) -> str:
-		""" Get the ID of last folder identified in the path, None if it does not exist. AKA getParentID"""
-		print("get parent id")
+		""" Get the ID of last folder identified in the path, None if it does not exist. """
+		if path=="":
+			return("root")
+
 		elements = self.getPathElements(path)
-		if len(elements)>0:
-			if   self.isFolder(elements[-1]):
-				return elements[-1]['id']
-			elif self.isFolder(elements[-1]) and len(elements)>1:
-				return elements[-2]['id']
-		return None
+		#remove last element if none
+		if len(elements)>0 and elements[-1] is None:
+			elements = elements[:-1]
+
+		if len(elements) == self.pathLength(path):
+			if len(elements)>0:
+				if   self.isFolder(elements[-1]):
+					return elements[-1]['id']
+				elif self.isFile(elements[-1]) and len(elements)>1:
+					return elements[-2]['id']
+			return("root")
+		else:
+			return(None)
 		
 	def getID(self, path: str, parentID: str=None) -> str:
 		""" Get the ID of the element identified from the path, None if it does not exist. """
-		file = self.downloadFile(path, parentID)
+		file = self.download(path, parentID)
 		if file is None:
 			return None
 		else:
 			return file['id']
+
+	def pathLength(self, path: str) -> int:
+		elements = path.strip('/').split('/')
+		return(len(elements))
 
 
 	#################################   Checking functions   ###################################################
@@ -255,17 +275,154 @@ class GDriveInterface:
 		return True
 
 
+	#################################   Create & Delete   ######################################################
 
-	###################################### other ###############################################################
+	def createFolder(self, path: str, parentID: str=None) -> str:
+		""" Create a folder at the given location. """
+		parent, folderName = self.__pathAndFile(path)
+		if self.isPathFolder(folderName) and path!="":
+			if parentID is None:
+				parentID = self.getLastFolderID(parent)
+			
+			if parentID is not None and not self.exists(path, parentID):
+				# the folder does not exist yet
+				if parentID=="root":
+					newFolder = self.drive.CreateFile({'title': folderName, "parents":  ['root'],			"mimeType": "application/vnd.google-apps.folder"})
+				else:
+					newFolder = self.drive.CreateFile({'title': folderName, "parents":  [{"id": parentID}], "mimeType": "application/vnd.google-apps.folder"})
+				newFolder.Upload()
+				if self.printMessage:	
+					print("Created folder", self.info(newFolder))
+				return newFolder['id']
+		return None
 
-	#def getFolder_inLocation(self, parentID, filename): # -> GoogleDriveFile
-	#	return self.downloadFile(parentID, filename)
+	def delete(self, path: str, parentID: str=None) -> bool:
+		""" Delete the file/folder at the given location. """
+		if path!="" and self.exists(path, parentID):
+			parent, filename = self.__pathAndFile(path)
+			if parentID is None:
+				parentID = self.getLastFolderID(parent)
+			if parentID is not None:
+				file = self.download(path, parentID)
+				#self.__deleteRecursive(file)	#apparently gDrive automatically delete all the tree...
+				self.__del(file)
+				return True
+		return False
+
+	def __deleteRecursive(self, file: GoogleDriveFile, permanentlyDelete: bool=False) -> None:
+		""" Deprecated: Delete the file/folder given. """
+		print("Warning deprecated function.")
+		if file is not None:
+			if self.isFile(file):
+				self.__del(file, permanentlyDelete)
+			else: 
+				#folder imply recursion...
+				#No recursion at the moment.
+				self.__del(file, permanentlyDelete)		
+
+	def __del(self, file: GoogleDriveFile, permanentlyDelete: bool=False) -> None:
+		if permanentlyDelete:
+			file.Delete()	# Permanently delete the file.
+		else:
+			file.Trash()	# Move file to trash.
+		if self.printMessage:	
+			print('Deleted' + self.info(file))	
+
+
+	#################################   Upload Functions   #####################################################
+
+	def upload(self, pathFrom: str, pathTo: str, parentID: str=None) -> bool:
+		""" Upload the source path and the entire subtree (if folder) to the destination path. """
+		res = False
+		if self.isPathFile(pathFrom):
+			#manage file
+			try:
+				with open(pathFrom, "r") as fLocal:
+					res = self.__uploadFile(fLocal, pathTo, parentID)
+			except IOError:
+				print(IOError, 'Error while reading the file given.')
+		else:
+			#manage folder
+			res = self.__uploadFolder(pathFrom, pathTo, parentID)
+
+		return res
+
+	def __uploadFolder(self, pathFrom: str, pathTo: str, parentID: str=None) -> bool:
+		""" Upload a folder (and the entire subtree) from the source path to the destination path. """
+		newFolderID = None
+		res = False
+		if parentID is None:
+			#if not defined yet precompute the ID of the folder and parent
+			IDs = self.getPathIDs(pathTo)
+			if IDs is not None:
+				#the folder does not exist yet
+				newFolderID = IDs[-1]
+				if len(IDs)>1:
+					#exist a parent ID
+					parentID = IDs[-2]
+				else:
+					parentID = "root"
+
+		if parentID is not None:
+			#still updating folder ID
+			if newFolderID is None:
+				newFolderID = self.getID(pathTo, parentID)
+				if newFolderID is None:
+					newFolderID = self.createFolder(pathTo, parentID)
+
+			if newFolderID is not None:
+				res = True
+				#for each file in folder upload it
+				for el in os.scandir(pathFrom):
+					newPathTo = '/'.join([pathTo, el.path.replace(pathFrom, '').strip('/')])
+					#print("\ncall on: from:\t", el.path, "\t-> to:", newPathTo, ", main folder ID:", newFolderID)
+					tmp =  self.upload(el.path, newPathTo, newFolderID) 
+
+					#update res (now True) it is sufficient a False to make fail the entire function
+					res = res and tmp	
+		return res
+					
+	def __uploadFile(self, file: "OS file", pathTo: str, parentID: str=None) -> bool:
+		""" Upload a file from the source path to the destination path. """
+		parent, filename = self.__pathAndFile(pathTo)
+		res = True
+		if parentID is None:
+			#compute parentID
+			parentID = self.getLastFolderID(parent)
 		
-	def downloadFile(self, path: str, parentID: str=None) -> GoogleDriveFile:
-		""" Download the file in the given location. None if it does not exist. """
-		if parentID is None or parentID=="":
+		self.delete(pathTo, parentID) #delete the previous file
+		if parentID is "root":
+			newFile = self.drive.CreateFile({'title': filename, "parents":  ['root']})
+		else:
+			newFile = self.drive.CreateFile({'title': filename, "parents":  [{"id": parentID}] })
+		
+		try:
+			#upload may fail due to internet connection (and other reasons)
+			newFile.SetContentString(file.read()) 
+			newFile.Upload()
+		except Exception as errLoading:
+			print("Error while loading file (wrong path):", errLoading)
+			res = False
+
+		if self.printMessage:
+			if res:
+				print('Uploaded' + self.info(newFile))
+			else:
+				print('Faild uploading' + self.info(newFile))
+		return res
+
+
+	#################################   Download Functions   ###################################################
+
+		
+	def download(self, path: str, parentID: str=None) -> GoogleDriveFile:
+		""" Download the file/folder at the given location. None if it does not exist. """
+		if parentID is None:
 			elements = self.getPathElements(path)
-			if elements is not None:
+			print("elements:(", len(elements), ")")
+			if len(elements)>0:
+				[print(self.info(el)) for el in elements]
+				print(elements[-1])
 				return elements[-1]
 		else:
 			file_list = self.drive.ListFile({'q': "'%s' in parents and trashed=false" % str(parentID)}).GetList()
@@ -276,6 +433,9 @@ class GDriveInterface:
 					return(f)
 		return(None)
 
+	
+	#def getFolder_inLocation(self, parentID, filename): # -> GoogleDriveFile
+	#	return self.download(parentID, filename)
 
 	#def getFolder(self, path): # -> GoogleDriveFile
 	#	return self.getFile(path)
@@ -296,107 +456,6 @@ class GDriveInterface:
 	#			return(f)
 	#	return(None)
 
-	############################################################################################################
-
-	#def deleteFile(self, path) -> None:
-	#	file = self.getFile(path)
-	#	self.__deleteCore(file)
-
-	#def deleteFile_inLocation(self, parentID, filename) -> None:
-	#	file = self.downloadFile(parentID, filename)
-	#	self.__deleteCore(file)
-
-	#def __deleteCore(self, file, permanentlyDelete=False) -> None:
-	#	if file is None:
-	#		if self.printMessage:	
-	#			print("File/folder not found and not deleted.")
-	#	else:
-	#		if permanentlyDelete:
-	#			file.Delete()	# Permanently delete the file.
-	#		else:
-	#			file.Trash()	# Move file to trash.
-	#		if self.printMessage:	
-	#			print('Deleted' + self.info(file))
-
-	############################################################################################################
-
-	#def uploadFile_fromLocation(self, pathFrom, pathTo=None) -> None:
-	#	self.updateFile_fromLocation(pathFrom, pathTo, overrideFile=False)
-
-	#def updateFile_fromLocation(self, pathFrom, pathTo=None, overrideFile=True) -> None:
-	#	if pathTo is None:
-	#		pathTo = pathFrom
-
-	#	try:
-	#		with open(pathFrom,"r") as fLocal:
-	#			self.updateFile(fLocal, pathTo, overrideFile)
-	#	except IOError:
-	#		print('Error while reading the file given.')
-
-	#def uploadFile(self, file, pathTo) -> None:
-	#	self.updateFile(file, pathTo, overrideFile=False)
-
-	#def updateFile(self, file, pathTo, overrideFile=True) -> None:
-	#	if not overrideFile:
-	#		print("Warning: The upload function do not override an existing file.")
-
-	#	parent, filename = self.__pathAndFile(pathTo)
-	#	parentID = self.getFolderID(parent)
-
-	#	oldFile = self.downloadFile(parentID, filename)
-	#	if oldFile is not None:
-	#		self.__deleteCore(oldFile)
-	#		if not overrideFile:
-	#			print("Warning: Now more than a copy of", filename, "will exists inside", parent)
-
-	#	if parentID is None:
-	#		newFile =   self.drive.CreateFile({'title': filename, "parents":  ['root']})
-	#	else:
-	#		newFile =   self.drive.CreateFile({'title': filename, "parents":  [{"id": parentID}] })
-
-	#	newFile.SetContentString(file.read()) 
-	#	newFile.Upload()
-	#	if self.printMessage:	
-	#		if overrideFile:
-	#			print('Updated' + self.info(newFile))
-	#		else:
-	#			print('Uploaded' + self.info(newFile))
-
-	############################################################################################################	
-	
-	#def downloadFile(self, pathFrom, pathTo=None) -> None:
-	#	if pathTo is None:
-	#		pathTo = pathFrom
-
-	#	fDrive = self.getFile(pathFrom)
-	#	try:
-	#		with open(pathTo,"w") as fLocal:
-	#			#todo: solve error
-	#			fLocal.write(fDrive.GetContentFile(True))
-	#	except IOError:
-	#		print('Error while writing the downloaded file.')
-		
-
-	############################################################################################################
-
-	#def createFolder(self, path) -> None:
-	#	parent, folderName = self.__pathAndFile(path)
-	#	parentID = self.getFolderID(parent)
-
-	#	if self.downloadFile(parentID, folderName) is None:
-	#		if parentID is None:
-	#			newFolder = self.drive.CreateFile({'title': folderName, "parents":  ['root'], "mimeType": "application/vnd.google-apps.folder"})
-	#		else:
-	#			newFolder = self.drive.CreateFile({'title': folderName, "parents":  [{"id": parentID}], "mimeType": "application/vnd.google-apps.folder"})
-	#		newFolder.Upload()
-	#		if self.printMessage:	
-	#			print("Created folder", self.info(newFolder))
-
-	#def deleteFolder(self, path) -> None:
-	#	return self.deleteFile(path)
-
-	#def deleteFolder_inLocation(self, parentID, filename) -> None:
-	#	return self.deleteFile_inLocation(parentID, filename)
 
 	############################################################################################################
 
@@ -406,24 +465,9 @@ class GDriveInterface:
 		print(type(fl[0]))
 
 def main():
-	filename = "testUpload.txt"
-
 	gDrive = GDriveInterface(storeCredentials=True, printMessage=True)
-	fDrive = gDrive.downloadFile("drive API/pippo/ciao.txt")
-	#todo: manage this case:
-	gDrive.saveLocalFile(fDrive, "prova/downloaded.txt/ciao.txt")
-	
-	#tmp = gDrive.getFolderID("pippo/minni/ciao")
-	#tmp = gDrive.getFileID("pippo/minni/ciao/test.txt")
-	#print("tmp", tmp)
 
-	#gDrive.updateFile_fromLocation("testUpload.txt", "driveAPI/ciao.txt")
-	#gDrive.createFolder("driveAPI/tobeDeleted")
-	
-	
-	
-	
-
+	print(gDrive.upload("prova", "driveAPI/try"))
 
 if __name__ == "__main__":
 	main()
