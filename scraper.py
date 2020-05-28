@@ -18,14 +18,6 @@ import os
 
 from googleDriveAPI.googleDriveAPI import GDriveInterface
 
-
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
-from pydrive.files	import GoogleDriveFile
-from googleapiclient.discovery import build
-import os
-import shutil
-
 #################################   Scraping functions   ###################################################
 
 def scrape_withPandas(url):
@@ -107,6 +99,8 @@ def saveData(filePath: str, df: pd.DataFrame, append: bool, sep: str=',') -> Non
 		mode = 'w'
 		h = True
 
+	# convert the numbers of the df for 3.567 to 3,567
+	df = df.applymap(lambda x: str(x).replace('.',','))
 	df.to_csv(filePath, mode=mode, header=h, index=False, sep=sep)
 	print("Data are saved.")
 	
