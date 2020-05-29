@@ -66,12 +66,12 @@ def scrape_withBS(url: str) -> list:
 
 #################################   Interaction with OS   ##################################################
 
-def loadData(filePath: str, companies: list, sep: str=',') -> "list of list":
+def loadData(filePath: str, companies: list, sep: str=',', decimal: str='.') -> "list of list":
 	""" Load the dataframe stored in the file given (.csv or .pkl), otherwise it create a new one. """
 	fileName, fileExtension = os.path.splitext(filePath)
 
 	if os.path.exists(filePath) and fileExtension == '.csv':
-		df = pd.read_csv(filePath, sep=sep, dtype=object)
+		df = pd.read_csv(filePath, sep=sep, decimal=decimal, dtype=object)
 		#dtype=object force pandas to consider the number (int or float) as string while loading the csv
 		#this guarantee that a number as 0.202 or 45.400 is not converted, solving 2 problems:
 		#1) the deletion of the precision (3 decimal digits) by removing zeros: 45.400 != 45.4
@@ -86,7 +86,7 @@ def loadData(filePath: str, companies: list, sep: str=',') -> "list of list":
 	
 	return df.values.tolist()
 
-def saveData(filePath: str, df: pd.DataFrame, append: bool, sep: str=',') -> None:
+def saveData(filePath: str, df: pd.DataFrame, append: bool, sep: str=',', decimal: str='.') -> None:
 	""" Save the dataframe given to the specified path as a csv file. """
 	fileName, fileExtension = os.path.splitext(filePath)
 	if append:
@@ -99,9 +99,8 @@ def saveData(filePath: str, df: pd.DataFrame, append: bool, sep: str=',') -> Non
 		mode = 'w'
 		h = True
 
-	# convert the numbers of the df for 3.567 to 3,567
-	df = df.applymap(lambda x: str(x).replace('.',','))
-	df.to_csv(filePath, mode=mode, header=h, index=False, sep=sep)
+	# convert the numbers of the df from 3.56 to 3,560
+	df.to_csv(filePath, index=False, mode=mode, header=h, decimal=decimal, sep=sep, float_format='%.3f')
 	print("Data are saved.")
 	
 
@@ -167,8 +166,6 @@ def processCompanies(archive: "list of list", companies: list, urls: list) -> pd
 		delta = round(values[1] - values[0], 3) #max-min
 		values.append(delta)					#AKA min, max, delta
 
-		#format the values to  be returned
-		values = ['{:.3f}'.format(v) for v in values]
 		print("\tCollected data:", values)
 		dailyMeasure.append(values)
 
@@ -202,11 +199,11 @@ def main():
 			if append:
 				archive = []
 			else:
-				archive = loadData(f_archive, companies, sep=';')
+				archive = loadData(f_archive, companies, sep=';', decimal='.')
 
 			#Process all the companies
 			df_archive = processCompanies(archive, companies, urls)
-			saveData(f_archive, df_archive, append, sep=';')
+			saveData(f_archive, df_archive, append, sep=';', decimal='.')
 
 			#Upload the generatted result on GoogleDrive
 			gDrive.upload(f_archive, "Archivio scraperDiBorsa/andamentoTitoli.csv")

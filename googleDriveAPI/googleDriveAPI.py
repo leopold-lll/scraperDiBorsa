@@ -40,7 +40,7 @@ class GDriveInterface:
 
 	#################################   Initialization Function   ##############################################
 
-	def __init__(	self, storeCredentials: bool=True, printMessage: bool=True, \
+	def __init__(	self, storeCredentials: bool=True, printMessage: bool=False, \
 					credentialsFile: str="myCredentials.json", clientSecrets: str="client_secrets.json") -> None:
 		""" Initialization function. """
 		self.printMessage = printMessage
@@ -48,8 +48,6 @@ class GDriveInterface:
 		self.setClientSecrets(clientSecrets)
 
 		self.drive = self.login(storeCredentials)
-		#todo: solve this
-		#print("Warning: this Class do not manage path with ../ to access previous folder nor / to access root. \n\tIt always go down in the tree folders structure.")
 
 	def setClientSecrets(self, clientSecrets: str) -> None:
 		""" Set the location of the client secret file. """
@@ -489,9 +487,9 @@ class GDriveInterface:
 
 	################################# - - - THE END - - - ######################################################
 
-def main():
-	gDrive = GDriveInterface(storeCredentials=True, printMessage=True)
+#def main():
+#	gDrive = GDriveInterface(storeCredentials=True, printMessage=True)
 
 
-if __name__ == "__main__":
-	main()
+#if __name__ == "__main__":
+#	main()
