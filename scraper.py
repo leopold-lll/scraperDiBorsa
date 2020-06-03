@@ -71,7 +71,8 @@ def loadData(filePath: str, companies: list, sep: str=',', decimal: str='.') -> 
 	fileName, fileExtension = os.path.splitext(filePath)
 
 	if os.path.exists(filePath) and fileExtension == '.csv':
-		df = pd.read_csv(filePath, sep=sep, decimal=decimal, dtype=object)
+		df = pd.read_csv(filePath, sep=sep, decimal=decimal)
+			#, dtype=object) #I want to consider the loaded number as number
 		#dtype=object force pandas to consider the number (int or float) as string while loading the csv
 		#this guarantee that a number as 0.202 or 45.400 is not converted, solving 2 problems:
 		#1) the deletion of the precision (3 decimal digits) by removing zeros: 45.400 != 45.4
@@ -170,7 +171,12 @@ def processCompanies(archive: "list of list", companies: list, urls: list) -> pd
 		dailyMeasure.append(values)
 
 	#Update archive and store it to file
-	archive.append(flat(dailyMeasure))
+	measures = flat(dailyMeasure)
+
+	#format the daily measure as comma separated list of numbers
+	#this line is fundamental if the df is composed of string, instead is wrong (this is the actual case) if the df contains number.
+	# measures[2:] = ['{:.3f}'.format(m).replace('.',',') for m in measures[2:]]
+	archive.append(measures)
 	return pd.DataFrame(archive, columns=flat(header))
 
 
@@ -199,11 +205,11 @@ def main():
 			if append:
 				archive = []
 			else:
-				archive = loadData(f_archive, companies, sep=';', decimal='.')
+				archive = loadData(f_archive, companies, sep=';', decimal=',')
 
 			#Process all the companies
 			df_archive = processCompanies(archive, companies, urls)
-			saveData(f_archive, df_archive, append, sep=';', decimal='.')
+			saveData(f_archive, df_archive, append, sep=';', decimal=',')
 
 			#Upload the generatted result on GoogleDrive
 			gDrive.upload(f_archive, "Archivio scraperDiBorsa/andamentoTitoli.csv")
