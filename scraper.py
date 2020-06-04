@@ -138,45 +138,71 @@ def loadTargets(f_targets: str, sep: str=',') -> (list, list):
 		urls = targets_df.iloc[:, 1].tolist()		#extract based on Serie index
 		return(companies, urls)
 
-def processCompanies(archive: "list of list", companies: list, urls: list) -> pd.DataFrame:
+def processCompanies(archive: "list of list", companies: list, urls: list, oneMeasure_perDay: bool=True) -> pd.DataFrame:
 	""" Process each one of companies given, and store to a dataframe the values downloaded from the urls. """
 
-	#Initialization
+	#Initialization of variables
 	header = []
 	dailyMeasure = []
+	dayFormat = "%d/%m/%Y"
+	hourFormat = "%H:%M:%S"
+	endOfDay = "23:59:59"
 
-	#Corner case: data still online but referred to the previous day (the night is a better moment for scraping)
-	header.append(["data", "ora"])
-	now = datetime.now()
 	today = date.today()
-	if now.hour<5:			#borsa have not open and the online table (hopefully) is not reset yet
-		yesterday = today - timedelta(days=1)
-		dailyMeasure.append([ yesterday.strftime("%d/%m/%Y") ])
-		dailyMeasure.append(["23:59:59"])
-	else:					#today's borsa is running or is over
-		dailyMeasure.append([ today.strftime("%d/%m/%Y") ])
-		dailyMeasure.append([ now.strftime("%H:%M:%S") ])
+	yesterday = today - timedelta(days=1)
+	now = datetime.now()
+	dawn = 5 #hour at which I suppose the website of the borsa reset the data of the previous day
 
-	#For each company
-	for company, url in zip(companies, urls):
-		print("\nprocessing:", company)
+	#Decide if the archive needs a new row, if it has to be updated or simply nothing is neccessary
+	scrapeAllowed = True
+	if oneMeasure_perDay and archive is not None:
+			lastUpdate = datetime.strptime(' '.join([archive[-1][0], archive[-1][1]]), ' '.join([dayFormat, hourFormat]) )
+		
+			#aggiorno se (oggi [e minore di 19]) o (prima_alba e ieri [e minore di 19]) = se (oggi o (prima_alba e ieri)) [e minore di 19]
+			if	(lastUpdate.date()==today or (now.hour<dawn and lastUpdate.date()==yesterday)):
+				#this is the case that the new data probably are the same as the last once
+				if lastUpdate.hour<19:	#at 19 the borsa is closed and the data are stable
+					#Delete the last row to update it with new fresh data
+					archive = archive[:-1][:]
+				else:
+					#The data of today are already collected succesfully (just skip - do nothing)
+					scrapeAllowed = False
+
+	#Creating the header
+	header.append(["data", "ora"])
+	for company in companies:
 		header.append( createHeaders(company) )
 
-		#scrape data from the website
-		values = scrape_withBS(url)				#returns min, max
-		delta = round(values[1] - values[0], 3) #max-min
-		values.append(delta)					#AKA min, max, delta
+	#The scrape procedure need to be runned to update the local values archived
+	if scrapeAllowed:
+		#Manage corner case: data still online but referred to the previous day (the night is a better moment for scraping)
+		if now.hour<dawn:			#borsa have not open and the online table (hopefully) is not reset yet
+			dailyMeasure.append([ yesterday.strftime(dayFormat) ])
+			dailyMeasure.append([endOfDay])
+		else:						#today's borsa is running or is over
+			dailyMeasure.append([ today.strftime(dayFormat) ])
+			dailyMeasure.append([ now.strftime(hourFormat) ])
 
-		print("\tCollected data:", values)
-		dailyMeasure.append(values)
+		#For each company
+		for company, url in zip(companies, urls):
+			print("\nprocessing:", company)
 
-	#Update archive and store it to file
-	measures = flat(dailyMeasure)
+			#scrape data from the website
+			values = scrape_withBS(url)				#returns min, max
+			delta = round(values[1] - values[0], 3) #max-min
+			values.append(delta)					#AKA min, max, delta
 
-	#format the daily measure as comma separated list of numbers
-	#this line is fundamental if the df is composed of string, instead is wrong (this is the actual case) if the df contains number.
-	# measures[2:] = ['{:.3f}'.format(m).replace('.',',') for m in measures[2:]]
-	archive.append(measures)
+			print("\tCollected data:", values)
+			dailyMeasure.append(values)
+
+		#Update archive and store it to file
+		measures = flat(dailyMeasure)
+
+		#format the daily measure as comma separated list of numbers
+		#this line is fundamental if the df is composed of string, instead is wrong (this is the actual case) if the df contains number.
+		# measures[2:] = ['{:.3f}'.format(m).replace('.',',') for m in measures[2:]]
+		archive.append(measures)
+	
 	return pd.DataFrame(archive, columns=flat(header))
 
 
@@ -208,7 +234,7 @@ def main():
 				archive = loadData(f_archive, companies, sep=';', decimal=',')
 
 			#Process all the companies
-			df_archive = processCompanies(archive, companies, urls)
+			df_archive = processCompanies(archive, companies, urls, oneMeasure_perDay=True)
 			saveData(f_archive, df_archive, append, sep=';', decimal=',')
 
 			#Upload the generatted result on GoogleDrive
