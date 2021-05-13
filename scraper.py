@@ -58,15 +58,26 @@ def scrape_withBS(url: str) -> list:
 	if isNaN(url):
 		print("\tMissing link")
 	else:
-		#Download the page with requests
-		page = req.get(url)
 
-		#Create a BeautifulSoup object (the DOM)
-		soup = bs(page.text, 'html.parser')	
+		#loop until the page is loaded correctly and the table is found or after k loops
+		table = None
+		for _ in range(10):
+			#Download the page with requests
+			page = req.get(url)
+
+			#Create a BeautifulSoup object (the DOM)
+			soup = bs(page.text, 'html.parser')
+
+			table = soup.find('table')
+			if table is None:
+				print("Warning tables not found. URL will be reloaded.")
+			else:
+				break
 
 		#Extract the table from the DOM
 		table = soup.find('table')		#find only the first table that occour -> equal to find_all('table')[0]
 		# tables = soup.findAll('table')	    #find all the tables and list them
+
 
 		#########################################################################
 		# Process the DOM
@@ -102,7 +113,7 @@ def loadData(filePath: str, companies: list, sep: str=',', decimal: str='.') -> 
 		df = pd.read_pickle(filePath)
 	else:
 		#create new dataframe
-		header = flat([createHeaders(c) for c in companies])	#create header
+		header = flat([createHeaders(str(c)) for c in companies])	#create header
 		df = pd.DataFrame([], columns=header)
 	
 	return df.values.tolist()
@@ -135,7 +146,8 @@ def isWorkingDay() -> bool:
 
 def createHeaders(name: str) -> list:
 	""" Format an header list. """
-	return([ name+" min",  name+" max",  name+" delta" ])
+	name = str(name)
+	return([ " ".join([name, "min"]),  " ".join([name, "max"]),  " ".join([name, "delta"]) ])
 
 def flat(ll: "list of list") -> list:
 	""" Transform a 2D list (aka Mat) into a 1D list. """
@@ -232,7 +244,7 @@ def main():
 	if isWorkingDay():
 		#Set input & output file
 		f_targets = "titoli.csv"
-		f_archive = "andamentoTitoli.csv"
+		f_archive = "./andamentoTitoli.csv"
 
 		# #Login to GoogleDrive and download titoli.csv
 		# gDrive = GDriveInterface(	storeCredentials=True, printMessage=True, \
