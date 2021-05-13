@@ -15,6 +15,7 @@ import pandas as pd
 
 from datetime import datetime, date, time, timedelta
 import os
+import re
 
 from googleDriveAPI.googleDriveAPI import GDriveInterface
 
@@ -32,9 +33,28 @@ def scrape_withPandas(url):
 	values = dfs[0][1].tolist()	#second column to list
 	return(values[2:0:-1])
 
+def scrape_withRegExp(url: str) -> list:
+	values = [0,0] #AKA min, max
+	if isNaN(url):
+		print("\tMissing link")
+	else:
+		#Download the page with requests
+		page = req.get(url)
+
+		l = re.split("Max oggi|Min oggi|Max Anno", str(page.text))[1:-1]
+		for i in range(2):
+			# get the actual values
+			strVal = re.split("<span class=\"t-text -right\">|</span>", l[i])[2]
+			# converts to float 
+			values[i] = float(strVal.replace(',', '.'))
+
+	return values
+
+
+
 def scrape_withBS(url: str) -> list:
 	""" Scrape the url given. """
-	values = [0,0,0]
+	values = [0,0,0] #AKA min, max, delta
 	if isNaN(url):
 		print("\tMissing link")
 	else:
@@ -45,13 +65,13 @@ def scrape_withBS(url: str) -> list:
 		soup = bs(page.text, 'html.parser')	
 
 		#Extract the table from the DOM
-		#table = soup.table					#wrapper for find('table')
-		table = soup.find('table')			#find only the first table that occour -> equal to find_all('table')[0]
-		#table = soup.find_all('table')[0]	#find all the tables and list them
+		table = soup.find('table')		#find only the first table that occour -> equal to find_all('table')[0]
+		# tables = soup.findAll('table')	    #find all the tables and list them
 
-		#Process the DOM
+		#########################################################################
+		# Process the DOM
 		rows_leftColumns = table.find_all(class_='t-text -right')	#extraction based on a class
-		#_ = table.find_all('span')									#extraction based on tag
+		_ = table.find_all('span')									#extraction based on tag
 
 		values = []
 		for el in rows_leftColumns[2:0:-1]:	#iteration 0°=max - 1°=min
@@ -188,7 +208,7 @@ def processCompanies(archive: "list of list", companies: list, urls: list, oneMe
 			print("\nprocessing:", company)
 
 			#scrape data from the website
-			values = scrape_withBS(url)				#returns min, max
+			values = scrape_withRegExp(url)			#returns min, max
 			delta = round(values[1] - values[0], 3) #max-min
 			values.append(delta)					#AKA min, max, delta
 
@@ -214,10 +234,10 @@ def main():
 		f_targets = "titoli.csv"
 		f_archive = "andamentoTitoli.csv"
 
-		#Login to GoogleDrive and download titoli.csv
-		gDrive = GDriveInterface(	storeCredentials=True, printMessage=True, \
-									credentialsFile="googleDriveAPI/myCredentials.json", clientSecrets="googleDriveAPI/client_secrets.json")
-		gDrive.download("Archivio scraperDiBorsa/titoli.csv", f_targets)
+		# #Login to GoogleDrive and download titoli.csv
+		# gDrive = GDriveInterface(	storeCredentials=True, printMessage=True, \
+		# 							credentialsFile="googleDriveAPI/myCredentials.json", clientSecrets="googleDriveAPI/client_secrets.json")
+		# gDrive.download("Archivio scraperDiBorsa/titoli.csv", f_targets)
 
 		#Load company names and urls from file
 		if not os.path.exists(f_targets):
@@ -238,7 +258,7 @@ def main():
 			saveData(f_archive, df_archive, append, sep=';', decimal=',')
 
 			#Upload the generatted result on GoogleDrive
-			gDrive.upload(f_archive, "Archivio scraperDiBorsa/andamentoTitoli.csv")
+			# gDrive.upload(f_archive, "Archivio scraperDiBorsa/andamentoTitoli.csv")
 	else:
 		#corner case -> no data to scrape
 		print("Today the Borsa is closed, and the website has no data...")

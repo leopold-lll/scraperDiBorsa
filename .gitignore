@@ -2,5 +2,6 @@
 .xlsx
 andamentoTitoli.csv
 
+soup.txt
 googleDriveAPI/myCredentials*.json
 *__pycache__
